@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# Copyright (c) 2018 Fabrice Laporte - kray.me
+# The MIT License http://www.opensource.org/licenses/mit-license.php
+
+# ezlumberjack
+# Delete git branches *selectively* by matching any part of the name.
+
+readonly PROGNAME=$(basename $0)
+
+usage() {
+    cat << EOF
+USAGE: $PROGNAME pattern
+
+    $PROGNAME lists identifiers for all git repository branches that match the criteria
+    given on the command line.
+    It then prompts you for which branch to delete.
+EOF
+}
+
+# Print array elements, one per line, prefixed by a letter identifier from a to z.
+# Alternate lines background colours for best readability.
+#
+# $@ - array to print
+print_alternate()
+{
+    lines_listing=("$@")
+    if [ ${#lines_listing[@]} -eq 0 ]; then
+        echo "No processes found."
+        exit 0
+    fi
+    CTRL_REVERSE="\e[7m"
+    CTRL_RESET="\e[27m"
+    LINE_IDX=a
+    for ((i = 0; i < ${#lines_listing[@]}; ++i)); do
+        cmd=`echo ${lines_listing[$i]} | cut -f 2-99 -d " " | cut -c 1-128`
+        ((i % 2 == 0)) && printf "${LINE_IDX}"
+        ((i % 2 != 0)) && printf "${CTRL_REVERSE}${LINE_IDX}${CTRL_RESET}"
+        echo " ${cmd}"
+        LINE_IDX=$(echo "$LINE_IDX" | tr "0-9a-z" "1-9a-z_")  # alpha increment
+        if [ $i -eq 25 ]; then
+            echo '...'
+            break
+        fi
+    done
+}
+
+ezlumberjack() {
+    killargs=${@:1:$#-1}  # all args but last
+    while IFS= read -r line; do
+        lines_listing+=("$line")
+    done < <( git branch -a | grep -e "${@: -1}" | grep -v "$0" )
+    unset "lines_listing[${#lines_listing[@]}-1]"  # remove last element which is our own grep
+    print_alternate "${lines_listing[@]}"
+    echo " "
+    read -p "Remove branch(es): " line_ids
+    for (( i=0; i<${#line_ids}; i++ )); do
+        ascii_line_id=`printf "${line_ids:$i:1}" | od -A n -t d1`  # get char ascii repr
+        idx=`expr $ascii_line_id - 97`
+        branch_full=`echo ${lines_listing[$idx]} | cut -f 1 -d " "`
+        branch_remote=`echo $branch_full | cut -f 2 -d "/"`
+        branch_name=`echo $branch_full | cut -f 3 -d "/"`
+        git push $branch_remote --delete $branch_name
+    done
+}
+
+
+main() {
+    if [ "$#" -eq 0 ] || [ "$1" == "-h" ]; then
+      usage
+      exit 0
+    fi
+    ezlumberjack $@
+}
+main $@
